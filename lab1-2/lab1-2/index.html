@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='utf-8' />
+    <title>my First Map</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1' />
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+   </style>
+</head>
+<body>
+   <div id='map'></div>
+   <script>
+      mapboxgl.accessToken = 'pk.eyJ1IjoiYmVvcGh1Y2FuaCIsImEiOiJjbXV3emxpbXAwMGdkMndxNW1mMmhqbGhyIn0.frAVYEMPJv1h--UNb6LvtA';
+      const mymap = new mapboxgl.Map({
+             container: 'map',
+             style: 'mapbox://styles/mapbox/standard',
+             projection: 'globe', //Display the map as a globe since satellite-v9 defaults to Mercator
+             center: [-122.3094214, 47.577708], //I searched up Mount Baker neighbothood on Google Map then got its longtitude and latitude so I can change it to center my favortie neigborhood on map.
+             zoom:12// It's different from zoom 1 because it gives me a better zoom to Mount Baker. 
+          });
+
+    mymap.addControl(new mapboxgl.FullscreenControl()); //This helps me to get fullscreen option on my map
+    mymap.addControl(new mapboxgl.NavigationControl()); //This helps me to zoom in or zoom out then re-center my main neighborhood. 
+
+    mymap.on('style.load', () => {
+    mymap.setConfigProperty('basemap', 'lightPreset', 'dusk');// This helps me to change my map to dark theme for those who are familiar to dark theme on their personal devices.
+    mymap.setConfigProperty('basemap', 'showPointOfInterestLabels', false); //This helps to hide the interest labels on my basemap so this can help user to reduce the redundant on my map
+});
+// code from the next step will go here!
+</script>
+</body>
+</html>
