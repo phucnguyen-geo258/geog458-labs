@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Megacities | Lab 2</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; }
+    #map { position: absolute; inset: 0; }
+    .panel { position: absolute; z-index: 2; color: white; background: rgba(9, 22, 39, .93); border: 1px solid #506177; border-radius: 10px; box-shadow: 0 5px 22px rgba(0,0,0,.25); }
+    #title { top: 15px; left: 15px; padding: 18px 22px; max-width: 490px; }
+    #title h1 { font-size: 27px; margin: 0 0 9px; }
+    #title p { color: #d0dce9; line-height: 1.45; font-size: 14px; margin: 0; }
+    #legend { right: 17px; bottom: 35px; width: 265px; padding: 17px 20px; }
+    #legend h2 { margin: 0 0 5px; font-size: 19px; }
+    #legend .sub { color: #cbd7e4; font-size: 12px; margin: 0 0 12px; }
+    .item { display: flex; align-items: center; gap: 12px; min-height: 51px; font-size: 13px; }
+    .circle { display: inline-block; flex: none; border-radius: 50%; border: 1px solid rgba(255,255,255,.8); }
+    #legend .note { border-top: 1px solid #506177; padding-top: 12px; margin: 12px 0 0; line-height: 1.5; font-size: 11px; color: #cbd7e4; }
+    #status { left: 15px; bottom: 20px; padding: 11px 15px; font-size: 12px; max-width: 390px; }
+    .mapboxgl-popup-content { color: #162230; padding: 14px 17px; min-width: 205px; border-radius: 8px; line-height: 1.5; }
+    .mapboxgl-popup-content strong { font-size: 17px; }
+    @media (max-width: 640px) {
+      #title { right: 65px; padding: 12px 14px; }
+      #title h1 { font-size: 19px; }
+      #title p { font-size: 11px; }
+      #legend { right: 10px; bottom: 45px; width: 195px; padding: 10px 13px; }
+      #legend h2 { font-size: 15px; }
+      .item { font-size: 10px; min-height: 42px; }
+      #status { max-width: 160px; font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="title" class="panel">
+    <h1>World Megacities</h1>
+    <p>Where do the world's largest populations live? Every dot represents a city. Larger, redder circles highlight the biggest urban populations.</p>
+  </div>
+  <div id="legend" class="panel">
+    <h2>City population</h2>
+    <p class="sub">Estimated population (Natural Earth)</p>
+    <div class="item"><span class="circle" style="width:6px;height:6px;background:#99d8c9"></span> Under 100,000</div>
+    <div class="item"><span class="circle" style="width:12px;height:12px;background:#fee08b"></span> 100,000–999,999</div>
+    <div class="item"><span class="circle" style="width:22px;height:22px;background:#fdae61"></span> 1–4.99 million</div>
+    <div class="item"><span class="circle" style="width:32px;height:32px;background:#f46d43"></span> 5–9.99 million</div>
+    <div class="item"><span class="circle" style="width:44px;height:44px;background:#d73027"></span> 10 million or more</div>
+    <div class="item"><span class="circle" style="width:5px;height:5px;background:#a4a4a4"></span> Population missing</div>
+    <p class="note">Circle sizes increase continuously with population. Symbols above show approximate representative sizes near the upper end of each class, capped for readability.<br>Source: Natural Earth, Populated Places.</p>
+  </div>
+  <div id="status" class="panel">Loading city data...</div>
+
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiYmVvcGh1Y2FuaCIsImEiOiJjbXV3emxpbXAwMGdkMndxNW1mMmhqbGhyIn0.frAVYEMPJv1h--UNb6LvtA';
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/dark-v11',
+      projection: 'globe',
+      center: [-20, 18],
+      zoom: 1.45
+    });
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    map.on('style.load', () => {
+      map.setFog({
+        color: '#e5e8f4',
+        'high-color': '#8c9dbd',
+        'horizon-blend': 0.25,
+        'space-color': '#08172f',
+        'star-intensity': 0.55
+      });
+    });
+
+    const status = document.getElementById('status');
+    const candidateNames = ['NAME', 'name', 'NAMEASCII', 'NAME_EN', 'NAME_CONVE', 'CITY', 'CITY_NAME', 'city_name', 'CITYNAME', 'name_long', 'NAMEALT'];
+    const candidatePopulations = ['POP_MAX', 'pop_max', 'POPULATION', 'population', 'POP', 'pop', 'POP_MIN', 'pop_min'];
+
+    function getProperty(properties, candidates, pattern) {
+      const keys = Object.keys(properties);
+      for (const candidate of candidates) {
+        const key = keys.find(k => k.toLowerCase() === candidate.toLowerCase());
+        if (key && properties[key] !== null && properties[key] !== undefined && String(properties[key]).trim() !== '') {
+          return properties[key];
+        }
+      }
+      const fallback = keys.find(k => pattern.test(k) && properties[k] !== null && properties[k] !== undefined && String(properties[k]).trim() !== '');
+      return fallback ? properties[fallback] : null;
+    }
+
+    function normalizeFeature(feature) {
+      const original = feature.properties || {};
+      const nameValue = getProperty(original, candidateNames, /(^name|city.*name|place.*name)/i);
+      const populationValue = getProperty(original, candidatePopulations, /(^pop_|^population$|^pop$)/i);
+      const populationNumber = populationValue === null ? NaN : Number(String(populationValue).replace(/,/g, ''));
+      const valid = Number.isFinite(populationNumber) && populationNumber >= 0;
+      return {
+        ...feature,
+        properties: {
+          ...original,
+          CITY_NAME_DISPLAY: nameValue === null ? 'City name unavailable' : String(nameValue),
+          CITY_POP: valid ? populationNumber : -1
+        }
+      };
+    }
+
+    map.on('load', async () => {
+      try {
+        const response = await fetch('./data/world-cities.geojson');
+        if (!response.ok) throw new Error('GeoJSON request returned HTTP ' + response.status);
+        const geojson = await response.json();
+        if (geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+          throw new Error('The GeoJSON must be a FeatureCollection.');
+        }
+        const features = geojson.features.filter(f => f && f.geometry && f.geometry.type === 'Point').map(normalizeFeature);
+        if (!features.length) throw new Error('The file contains no Point features.');
+        console.log('First city properties:', geojson.features[0].properties);
+
+        map.addSource('world-cities', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features }
+        });
+
+        map.addLayer({
+          id: 'city-population-circles',
+          type: 'circle',
+          source: 'world-cities',
+          paint: {
+            // I use square root for the circle size because bigger population should have bigger circle, but not too big to cover other cities.
+            'circle-radius': [
+              'case', ['<', ['get', 'CITY_POP'], 0], 2.5,
+              ['interpolate', ['linear'], ['sqrt', ['get', 'CITY_POP']],
+                0, 2,
+                316.2278, 3,
+                1000, 6,
+                2236.0679, 11,
+                3162.2777, 16,
+                7071.0678, 22
+              ]
+            ],
+            // I split population into 5 groups and use red for the biggest cities so it is easier to see where the megacities are.
+            'circle-color': [
+              'case', ['<', ['get', 'CITY_POP'], 0], '#a4a4a4',
+              ['step', ['get', 'CITY_POP'], '#99d8c9',
+                100000, '#fee08b',
+                1000000, '#fdae61',
+                5000000, '#f46d43',
+                10000000, '#d73027'
+              ]
+            ],
+            'circle-opacity': 0.8,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 0.6,
+            'circle-stroke-opacity': 0.7
+          }
+        });
+
+        const unknownNames = features.filter(f => f.properties.CITY_NAME_DISPLAY === 'City name unavailable').length;
+        const validPopulation = features.filter(f => f.properties.CITY_POP >= 0).length;
+        status.textContent = `${features.length.toLocaleString()} cities loaded. Click a circle to see its name and population.`;
+        console.log('City data check:', { cities: features.length, validPopulation, unknownNames });
+        if (unknownNames) console.warn(`${unknownNames} cities have no recognized name. Check the original GeoJSON property names.`);
+
+        map.on('click', e => {
+          const p = e.point;
+          const found = map.queryRenderedFeatures([[p.x - 8, p.y - 8], [p.x + 8, p.y + 8]], { layers: ['city-population-circles'] });
+          if (!found.length) return;
+          const nearest = found.map(feature => {
+            const projected = map.project(feature.geometry.coordinates.slice(0, 2));
+            return { feature, distance: Math.hypot(projected.x - p.x, projected.y - p.y) };
+          }).sort((a, b) => a.distance - b.distance)[0].feature;
+          const props = nearest.properties;
+          const popupElement = document.createElement('div');
+          const title = document.createElement('strong');
+          title.textContent = props.CITY_NAME_DISPLAY;
+          const detail = document.createElement('div');
+          detail.textContent = 'Estimated population: ' + (props.CITY_POP < 0 ? 'Not available' : Number(props.CITY_POP).toLocaleString('en-US'));
+          popupElement.append(title, detail);
+          new mapboxgl.Popup({ offset: 12 }).setLngLat(nearest.geometry.coordinates.slice(0, 2)).setDOMContent(popupElement).addTo(map);
+        });
+        map.on('mouseenter', 'city-population-circles', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'city-population-circles', () => { map.getCanvas().style.cursor = ''; });
+      } catch (error) {
+        console.error('City GeoJSON loading error:', error);
+        status.textContent = 'Could not load cities. Check the data folder, filename, and browser Console.';
+      }
+    });
+
+    map.on('error', e => console.error('Mapbox error:', e.error));
+  </script>
+</body>
+</html>
