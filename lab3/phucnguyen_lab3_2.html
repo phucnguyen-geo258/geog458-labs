@@ -1,0 +1,443 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab 3: Seattle Soccer Fields</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.css">
+
+  <style>
+    body {
+      margin: 0;
+      font: 14px/1.5 Arial, sans-serif;
+      color: #182e3a;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+    }
+
+    #panel {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 16px;
+      width: 280px;
+      max-width: calc(100% - 100px);
+      max-height: calc(100% - 80px);
+      overflow: auto;
+      background: white;
+      border-radius: 7px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      z-index: 2;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    .control {
+      margin: 10px 0;
+    }
+
+    .control label {
+      cursor: pointer;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 7px 0;
+    }
+
+    .legend-color {
+      width: 16px;
+      height: 16px;
+      border: 1px solid #aaa;
+      border-radius: 3px;
+    }
+
+    .note {
+      font-size: 12px;
+      color: #566773;
+    }
+
+    #field-details {
+      margin-top: 15px;
+      padding: 10px;
+      background: #f0f4f6;
+      border-radius: 5px;
+      display: none;
+      white-space: pre-line;
+    }
+
+    .maplibregl-popup-content {
+      white-space: pre-line;
+      line-height: 1.6;
+      color: #182e3a;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <section id="panel">
+    <h1>Seattle Soccer Fields</h1>
+
+    <p>
+      This map shows soccer field locations across Seattle
+      and compares different field surface types.
+    </p>
+
+    <p id="status">
+      Click a soccer field point to see more information.
+    </p>
+
+    <div class="control">
+      <label>
+        <input id="show-surface" type="checkbox">
+        Show soccer field raster
+      </label>
+    </div>
+
+    <div class="control">
+      <label>
+        <input id="show-stations" type="checkbox" checked>
+        Show interactive soccer fields
+      </label>
+    </div>
+
+    <div id="legend">
+      <p><strong>Soccer field surface type</strong></p>
+
+      <div class="legend-item">
+        <span class="legend-color"
+          style="background:#4daf4a;"></span>
+        Grass
+      </div>
+
+      <div class="legend-item">
+        <span class="legend-color"
+          style="background:#ff7f00;"></span>
+        Synthetic
+      </div>
+
+      <div class="legend-item">
+        <span class="legend-color"
+          style="background:#999999;"></span>
+        Other / Unknown
+      </div>
+    </div>
+
+    <div id="field-details"></div>
+
+    <p class="note">
+      The colored raster symbols were exported from QGIS.
+      Click the interactive points for more information.
+    </p>
+
+    <p class="note">
+      Data: Seattle Parks and Recreation / Seattle GeoData.
+      Map by Phuc Nguyen.
+    </p>
+  </section>
+
+  <script type="module">
+    import * as maplibregl from
+      'https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.mjs';
+
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {},
+        layers: [{
+          id: 'background',
+          type: 'background',
+          paint: {
+            'background-color': '#edf1f0'
+          }
+        }]
+      },
+      center: [-122.33, 47.61],
+      zoom: 10,
+      minZoom: 8,
+      maxZoom: 12,
+      maxBounds: [
+        [-122.50, 47.45],
+        [-122.15, 47.80]
+      ]
+    });
+
+    map.addControl(new maplibregl.NavigationControl());
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: 'metric' })
+    );
+
+    let selectedField = null;
+    let activePopup = null;
+
+    const fieldDetails = document.getElementById('field-details');
+    const status = document.getElementById('status');
+
+    map.on('error', (event) => {
+      console.error('Map error:', event.error);
+      status.textContent =
+        'Map loading issue. Check the browser Console.';
+    });
+
+    map.on('load', () => {
+
+      
+      map.addSource('basemap-tiles', {
+        type: 'raster',
+        tiles: [
+          'asset/MapBox-independent/{z}/{x}/{y}.png'
+        ],
+        tileSize: 256,
+        scheme: 'xyz',
+        minzoom: 8,
+        maxzoom: 12,
+        bounds: [-122.50, 47.45, -122.15, 47.80],
+        attribution:
+          '© Mapbox © OpenStreetMap contributors'
+      });
+
+      map.addLayer({
+        id: 'basemap',
+        type: 'raster',
+        source: 'basemap-tiles',
+        paint: {
+          'raster-opacity': 1,
+          'raster-fade-duration': 0
+        }
+      });
+
+      
+      map.addSource('soccer-tiles', {
+        type: 'raster',
+        tiles: [
+          'asset/soccer-fields/{z}/{x}/{y}.png'
+        ],
+        tileSize: 256,
+        scheme: 'xyz',
+        minzoom: 8,
+        maxzoom: 12,
+        bounds: [-122.50, 47.45, -122.15, 47.80],
+        attribution:
+          'Seattle GeoData - Soccer Fields'
+      });
+
+      map.addLayer({
+        id: 'soccer-surface',
+        type: 'raster',
+        source: 'soccer-tiles',
+        layout: {
+          visibility: 'none'
+        },
+        paint: {
+          'raster-opacity': 1,
+          'raster-fade-duration': 0
+        }
+      });
+
+      map.addSource('soccer-data', {
+        type: 'geojson',
+        data: 'data/Soccer_Fields.geojson'
+      });
+
+      map.addLayer({
+        id: 'soccer-points',
+        type: 'circle',
+        source: 'soccer-data',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': [
+            'match',
+            ['get', 'E_SURFACE'],
+            'Grass', '#4daf4a',
+            'Synthetic', '#ff7f00',
+            '#999999'
+          ],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2
+        }
+      });
+
+      // A separate layer highlights the selected field.
+      map.addSource('selected-field', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: []
+        }
+      });
+
+      map.addLayer({
+        id: 'selected-highlight',
+        type: 'circle',
+        source: 'selected-field',
+        paint: {
+          'circle-radius': 12,
+          'circle-color': '#ffff00',
+          'circle-opacity': 0.15,
+          'circle-stroke-color': '#ffff00',
+          'circle-stroke-width': 3
+        }
+      });
+
+      function showField(feature) {
+        selectedField = feature;
+
+        const properties = feature.properties || {};
+        const coordinates = feature.geometry.coordinates.slice();
+
+        const name = properties.NAME || 'Unknown';
+        const address = properties.ADDRESS || 'Not available';
+        const surface = properties.E_SURFACE || 'Unknown';
+        const lights = properties.E_LIGHTS || 'Not available';
+        const division = properties.DIVISION || 'Not available';
+
+        const information = [
+          'Field: ' + name,
+          'Address: ' + address,
+          'Surface: ' + surface,
+          'Lights: ' + lights,
+          'Division: ' + division
+        ].join('\n');
+
+        map.getSource('selected-field').setData({
+          type: 'FeatureCollection',
+          features: [feature]
+        });
+
+        fieldDetails.style.display = 'block';
+        fieldDetails.textContent = information;
+
+        if (activePopup) {
+          activePopup.remove();
+        }
+
+        activePopup = new maplibregl.Popup({
+          offset: 15,
+          closeOnClick: false
+        })
+          .setLngLat(coordinates)
+          .setText(information)
+          .addTo(map);
+
+        status.textContent = 'Selected field: ' + name;
+      }
+
+      map.on('click', (event) => {
+        if (!document.getElementById('show-stations').checked) {
+          return;
+        }
+
+        const radius = 18;
+        const point = event.point;
+
+        const features = map.queryRenderedFeatures(
+          [
+            [point.x - radius, point.y - radius],
+            [point.x + radius, point.y + radius]
+          ],
+          { layers: ['soccer-points'] }
+        );
+
+        if (features.length > 0) {
+          const nearest = features.reduce((best, feature) => {
+            const coordinates = feature.geometry.coordinates;
+            const projected = map.project(coordinates);
+            const distance = Math.hypot(
+              projected.x - point.x,
+              projected.y - point.y
+            );
+
+            if (!best || distance < best.distance) {
+              return { feature, distance };
+            }
+
+            return best;
+          }, null);
+
+          if (nearest) {
+            showField(nearest.feature);
+          }
+        }
+      });
+
+      map.on('mousemove', (event) => {
+        if (!document.getElementById('show-stations').checked) {
+          map.getCanvas().style.cursor = '';
+          return;
+        }
+
+        const features = map.queryRenderedFeatures(
+          [
+            [event.point.x - 12, event.point.y - 12],
+            [event.point.x + 12, event.point.y + 12]
+          ],
+          { layers: ['soccer-points'] }
+        );
+
+        map.getCanvas().style.cursor =
+          features.length > 0 ? 'pointer' : '';
+      });
+
+      document.getElementById('show-surface')
+        .addEventListener('change', (event) => {
+          map.setLayoutProperty(
+            'soccer-surface',
+            'visibility',
+            event.target.checked ? 'visible' : 'none'
+          );
+        });
+
+      document.getElementById('show-stations')
+        .addEventListener('change', (event) => {
+          const visible = event.target.checked;
+
+          map.setLayoutProperty(
+            'soccer-points',
+            'visibility',
+            visible ? 'visible' : 'none'
+          );
+
+          map.setLayoutProperty(
+            'selected-highlight',
+            'visibility',
+            visible ? 'visible' : 'none'
+          );
+
+          if (!visible) {
+            if (activePopup) {
+              activePopup.remove();
+              activePopup = null;
+            }
+
+            fieldDetails.style.display = 'none';
+            status.textContent =
+              'Turn on interactive soccer fields to click locations.';
+          } else {
+            status.textContent =
+              'Click a soccer field point to view its details.';
+          }
+        });
+
+      status.textContent =
+        'Click a soccer field point to view its details.';
+    });
+  </script>
+</body>
+</html>
